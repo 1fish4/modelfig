@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 测试与缓存
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 示例产出（每次运行都会重新生成，不入库）
+examples/output/
