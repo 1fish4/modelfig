@@ -23,3 +23,6 @@ htmlcov/
 
 # 示例产出（每次运行都会重新生成，不入库）
 examples/output/
+
+# 展示图渲染的中间产物（最终版面在 docs/images/ 中入库）
+docs/_build/

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modelfig"
-version = "0.2.0"
-description = "面向科研与数学建模的标准化 matplotlib 绘图模板库：风格与配色正交，一份数据多套观感"
+version = "0.3.0"
+description = "面向科研与数学建模的 matplotlib 绘图模板库：风格、配色、底色三者正交，一份数据多套观感"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

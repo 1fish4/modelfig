@@ -33,6 +33,7 @@ from .fonts import available_chinese_fonts, setup_chinese_font
 from .palettes import (
     PALETTES,
     categorical,
+    describe_palette,
     list_palettes,
     palette_names,
     register_palette,
@@ -66,24 +67,28 @@ from .stats import (
     violinplot,
 )
 from .styles import (
+    BACKGROUNDS,
     STYLES,
+    current_background,
     current_palette,
     current_style,
     get_style,
     register_style,
     set_style,
+    style_info,
     style_names,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # 风格
-    "set_style", "style_names", "get_style", "register_style",
-    "current_style", "current_palette", "STYLES",
+    "set_style", "style_names", "style_info", "get_style", "register_style",
+    "current_style", "current_palette", "current_background",
+    "STYLES", "BACKGROUNDS",
     # 配色
-    "palette_names", "list_palettes", "categorical", "sequential",
-    "register_palette", "PALETTES",
+    "palette_names", "list_palettes", "describe_palette", "categorical",
+    "sequential", "register_palette", "PALETTES",
     # 字体
     "setup_chinese_font", "available_chinese_fonts",
     # 通用层绘图
