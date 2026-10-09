@@ -345,38 +345,65 @@ def violinplot(
 # 分组比较类图
 # ---------------------------------------------------------------------------
 
+def _sem(values: np.ndarray) -> float | None:
+    """标准误（SEM）。样本量不足 2 时无法估计，返回 ``None``。"""
+    n = len(values)
+    if n < 2:
+        return None
+    return float(values.std(ddof=1) / np.sqrt(n))
+
+
+def _draw_bracket(ax, x1: float, x2: float, y: float, h: float,
+                  text: str, *, pad: float) -> None:
+    """在两个位置之间画显著性括号并标注。"""
+    ax.plot(
+        [x1, x1, x2, x2], [y, y + h, y + h, y],
+        linewidth=0.9, color="#3A3A3A", clip_on=False, zorder=5,
+    )
+    ax.text(
+        (x1 + x2) / 2, y + h, text,
+        ha="center", va="bottom", color="#1A1A1A",
+        fontsize=pad, zorder=5,
+    )
+
+
 def barplot(
     data: Any = None,
     x: str | None = None,
     y: str | None = None,
     *,
     hue: str | None = None,
-    errorbar: str | Sequence[float] | None = None,
-    annotate: dict[str, list[tuple[str, str]]] | None = None,
+    errorbar: str | None = "auto",
+    show_points: bool = False,
+    annotate: Sequence[tuple] | dict | None = None,
     xlabel: str = "",
     ylabel: str = "",
     title: str = "",
     ax: Any = None,
 ):
-    """分组柱状图，支持误差棒与显著性标注。
+    """分组柱状图，默认带误差棒，可选叠加散点与显著性标注。
+
+    默认行为刻意贴近科研惯例：**只要每组有重复观测，就自动标出标准误**。
+    不标误差的柱状图在正式场合是不完整的。
 
     参数
     ----
-    errorbar : str 或 序列, 可选
-        误差棒。给列名则从该列读取误差值；给序列则直接使用。
-    annotate : dict, 可选
-        显著性标注，格式 ``{组名: [(横坐标类别, 标注文本), ...]}``。
-        文本通常用 ``"***"``；留空传 ``"__auto__"`` 会自动做 t 检验。
-
-    示例
-    ----
-    >>> mf.barplot(df, x="处理", y="产量", hue="品种",
-    ...            annotate={"A": [("处理1", "***")]})
+    errorbar : str 或 None, 默认 "auto"
+        ``"auto"`` 按标准误（SEM）自动计算；给列名则读取该列的均值作为误差；
+        置为 ``None`` 则不画误差棒。
+    show_points : bool, 默认 False
+        是否叠加原始观测散点（横向抖动）。样本量可见，是投稿推荐做法。
+    annotate : 序列, 可选
+        显著性标注。每项为 ``(组A, 组B)`` 时自动做 t 检验取星号，
+        或 ``(组A, 组B, "文本")`` 直接指定标注内容。
+        例：``annotate=[("对照组", "处理组1"), ("处理组1", "处理组2", "***")]``
 
     返回
     ----
     (fig, ax)
     """
+    from scipy import stats as _stats
+
     frame = _to_frame(data, x, y)
     xk = _column(frame, x, "x")
     yk = _column(frame, y, "y")
@@ -388,60 +415,93 @@ def barplot(
 
     cats = list(dict.fromkeys(frame[xk]))
     xpos = np.arange(len(cats))
+    #: 记录每个 (类别, 分组层级) 的原始观测，供显著性检验与散点叠加使用
+    raw: dict[tuple, np.ndarray] = {}
+    #: 记录每个 (类别, 分组层级) 对应的横向位置
+    pos: dict[tuple, float] = {}
+
+    def _err(sub: pd.DataFrame) -> float | None:
+        if errorbar is None:
+            return None
+        if errorbar == "auto":
+            return _sem(sub[yk].astype(float).to_numpy())
+        return float(sub[errorbar].astype(float).mean())
 
     if hue is None:
-        means = [
-            frame.loc[frame[xk] == c, yk].astype(float).mean() for c in cats
-        ]
-        errs = None
-        if isinstance(errorbar, str):
-            errs = [
-                frame.loc[frame[xk] == c, errorbar].astype(float).mean()
-                for c in cats
-            ]
-        elif errorbar is not None:
-            errs = np.asarray(errorbar, dtype=float)
-        ax.bar(xpos, means, width=0.6, yerr=errs, capsize=4)
+        means, errs = [], []
+        for c in cats:
+            sub = frame.loc[frame[xk] == c]
+            means.append(float(sub[yk].astype(float).mean()))
+            errs.append(_err(sub))
+            raw[(c, None)] = sub[yk].astype(float).to_numpy()
+        yerr = None if all(e is None for e in errs) else errs
+        ax.bar(xpos, means, width=0.62, yerr=yerr,
+               capsize=3, error_kw={"linewidth": 0.9, "ecolor": "#3A3A3A"})
+        for i, c in enumerate(cats):
+            pos[(c, None)] = float(xpos[i])
     else:
         levels = list(dict.fromkeys(frame[hue]))
-        width = 0.8 / len(levels)
+        width = 0.78 / len(levels)
         for i, lv in enumerate(levels):
-            sub = frame[frame[hue] == lv]
-            means = [
-                sub.loc[sub[xk] == c, yk].astype(float).mean() for c in cats
-            ]
-            errs = None
-            if isinstance(errorbar, str):
-                errs = [
-                    sub.loc[sub[xk] == c, errorbar].astype(float).mean()
-                    for c in cats
-                ]
+            sub_all = frame[frame[hue] == lv]
+            means, errs = [], []
+            for c in cats:
+                sub = sub_all.loc[sub_all[xk] == c]
+                means.append(float(sub[yk].astype(float).mean()))
+                errs.append(_err(sub))
+                raw[(c, str(lv))] = sub[yk].astype(float).to_numpy()
+            yerr = None if all(e is None for e in errs) else errs
             offset = (i - (len(levels) - 1) / 2) * width
             ax.bar(xpos + offset, means, width=width, label=str(lv),
-                   yerr=errs, capsize=3)
+                   yerr=yerr, capsize=2.5,
+                   error_kw={"linewidth": 0.9, "ecolor": "#3A3A3A"})
+            for j, c in enumerate(cats):
+                pos[(c, str(lv))] = float(xpos[j] + offset)
         ax.legend(title=hue)
 
-    # 显著性标注
+    # --- 叠加原始散点：让样本量与分布形态可见 ---
+    if show_points:
+        rng = np.random.default_rng(0)
+        for key, values in raw.items():
+            if len(values) == 0:
+                continue
+            jitter = rng.normal(0, 0.035, size=len(values))
+            ax.scatter(
+                np.full(len(values), pos[key]) + jitter, values,
+                s=9, color="#2B2B2B", alpha=0.55, linewidths=0,
+                zorder=4,
+            )
+
+    # --- 显著性标注：柱顶之上逐层堆叠括号 ---
     if annotate:
-        ymax = ax.get_ylim()[1]
-        for i, cat in enumerate(cats):
-            for pair in annotate.get(cat, []):
-                if len(pair) == 2 and pair[1] == "__auto__":
-                    group_a = frame.loc[frame[xk] == cat, yk].astype(float)
-                    if hue is not None:
-                        lv_a = list(dict.fromkeys(frame[hue]))[0]
-                        group_a = frame.loc[
-                            (frame[xk] == cat) & (frame[hue] == lv_a), yk
-                        ].astype(float)
-                    text = "n/a"
-                    if len(group_a) >= 2:
-                        text = _sig_text(0.03)
+        pairs = (
+            [(k, v) for k, v in annotate.items()] if isinstance(annotate, dict)
+            else list(annotate)
+        )
+        ax.relim()
+        ax.autoscale_view()
+        ylo, yhi = ax.get_ylim()
+        span = yhi - ylo
+        ax.set_ylim(top=yhi + span * (0.10 + 0.11 * len(pairs)))
+
+        base = yhi + span * 0.03
+        for level, item in enumerate(pairs):
+            a, b = item[0], item[1]
+            if len(item) >= 3:
+                text = str(item[2])
+            else:
+                va = raw.get((a, None), np.array([]))
+                vb = raw.get((b, None), np.array([]))
+                if len(va) >= 2 and len(vb) >= 2:
+                    _, p = _stats.ttest_ind(va, vb, equal_var=False)
+                    text = _sig_text(float(p))
                 else:
-                    text = pair[-1]
-                ax.text(
-                    i, ymax * 0.95, text,
-                    ha="center", va="bottom", fontsize=13,
-                )
+                    text = "n/a"
+            y = base + level * span * 0.10
+            _draw_bracket(
+                ax, pos.get((a, None), 0), pos.get((b, None), 1),
+                y, span * 0.022, text, pad=plt.rcParams["font.size"] * 0.85,
+            )
 
     ax.set_xticks(xpos)
     ax.set_xticklabels([str(c) for c in cats])
@@ -641,7 +701,7 @@ def corr_heatmap(
     xlabel: str = "",
     ylabel: str = "",
     title: str = "相关性热图",
-    cmap: str = "warm_cool",
+    cmap: str = "auto",
     ax: Any = None,
 ):
     """相关性矩阵热图。
@@ -654,6 +714,9 @@ def corr_heatmap(
         ``"pearson"`` / ``"spearman"`` / ``"kendall"``。
     mask_upper : bool, 默认 False
         是否遮住上三角。相关矩阵是对称的，遮一半更简洁。
+    cmap : str, 默认 "auto"
+        ``"auto"`` 自动构造「蓝—白—红」发散色带；
+        也可传配色名（见 :func:`modelfig.palette_names`）或任意 matplotlib 色带名。
 
     返回
     ----
@@ -668,13 +731,18 @@ def corr_heatmap(
     else:
         fig = ax.figure
 
-    # 用当前配色构造渐变 colormap，让热图颜色与整体风格一致。
+    # 相关矩阵需要「发散型」色带：负相关偏蓝、0 为白、正相关偏红。
+    # 直接取渐变配色的两端再加白色构造，色带随当前配色走。
     from matplotlib.colors import LinearSegmentedColormap
 
     from .palettes import PALETTES, sequential
 
-    if cmap in PALETTES:
-        cm = LinearSegmentedColormap.from_list("modelfig_seq", sequential(cmap))
+    if cmap == "auto" or cmap in PALETTES:
+        stops = sequential("warm_cool" if cmap == "auto" else cmap)
+        cm = LinearSegmentedColormap.from_list(
+            "modelfig_div",
+            [stops[-3], stops[-1], "#FFFFFF", stops[3], stops[0]],
+        )
     else:
         cm = cmap
 
@@ -780,7 +848,6 @@ def pairplot_grid(
         axes[0][-1].legend(fontsize=8)
     if title:
         fig.suptitle(title, y=0.995)
-    fig.tight_layout()
     return fig, axes
 
 
@@ -889,7 +956,7 @@ def facet_grid(
         else:
             ax.bar(sub[xk].astype(str), sub[yk], color=color)
 
-        ax.set_title(f"{col} = {lv}")
+        ax.set_title(f"{col}={lv}")
         if r == nrows - 1:
             ax.set_xlabel(xlabel or xk)
         if c == 0:
@@ -900,7 +967,6 @@ def facet_grid(
         r, c = divmod(idx, ncols)
         axes[r][c].set_visible(False)
 
-    fig.tight_layout()
     return fig, axes
 
 
