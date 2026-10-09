@@ -89,12 +89,13 @@ def demo_style_palette_matrix():
     """同一份折线数据，在 3 套风格 × 2 套配色下各出一张。"""
     x, y = sample_trend()
     combos = [
-        ("paper", "soft_academic"),
-        ("paper", "misty_blue"),
+        ("journal", "soft_academic"),
+        ("soft", "soft_academic"),
+        ("soft", "soft_multi"),
+        ("soft", "misty_blue"),
+        ("soft", "teal_earth"),
         ("slide", "soft_academic"),
-        ("slide", "soft_multi"),
-        ("poster", "warm_cool"),
-        ("poster", "misty_blue"),
+        ("poster", "geo"),
     ]
     for style, palette in combos:
         mf.set_style(style, palette=palette)
@@ -281,7 +282,7 @@ def main() -> None:
     print("[modelfig] 第一部分：风格 × 配色 对比 …")
     demo_style_palette_matrix()
 
-    mf.set_style("paper", palette="soft_academic")
+    mf.set_style("soft", palette="soft_academic", background="cream")
     print("[modelfig] 第二部分：基础图种 …")
     demo_basic()
 
