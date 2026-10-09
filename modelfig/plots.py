@@ -296,9 +296,10 @@ def radar(
     ax.set_theta_direction(-1)
 
     if labels is not None:
-        ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
+        # 推到坐标区外侧，避免压住蛛网外圈；tight bbox 会把图例纳入导出范围。
+        ax.legend(loc="upper right", bbox_to_anchor=(1.32, 1.14))
     if title:
-        ax.set_title(title, pad=20)
+        ax.set_title(title, pad=28)
     return fig, ax
 
 
