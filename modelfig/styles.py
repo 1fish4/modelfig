@@ -1,20 +1,32 @@
 """风格系统：为科研绘图提供开箱即用的成套视觉风格。
 
-设计要点
+三个正交维度
+------------
+**风格（style）** × **配色（palette）** × **底色（background）**
+
+    mf.set_style("soft", palette="soft_academic")             # 柔和风 + 蓝橙配色
+    mf.set_style("journal", palette="soft_multi")             # 期刊风 + 多彩配色
+    mf.set_style("soft", palette="misty_blue", background="cream")
+
+三者自由组合，只需维护 4 套风格 + 7 套配色，即可覆盖大部分科研出图场景。
+
+设计语言
 --------
-**风格与配色是正交的两个维度。** 风格决定"线条多粗、字多大、有没有网格"，
-配色决定"用什么颜色"。两者可以自由组合：
+所有风格都遵循同一套「科研出图」视觉约定，这是让图显得专业的关键：
 
-    mf.set_style("paper", palette="soft_academic")   # 论文风 + 柔和学术配色
-    mf.set_style("slide", palette="soft_multi")      # 答辩风 + 柔和多彩配色
-
-这样只需维护 ``2 × 4 = 8`` 种组合，而不是把 8 种组合各写一遍。
+1. **去边框**：只保留左、下两条轴线（despine），不用四边封闭的方框
+2. **轴细线粗**：坐标轴 0.6pt，数据线 1.5~1.8pt —— 约 1:3 的反差让数据"跳出来"
+3. **字号偏小**：8~9pt，让图显密实而非松散
+4. **网格若有若无**：柔和的浅灰点线，透明度约 0.7
+5. **标记描白边**：重叠的数据点更清爽
+6. **紧凑布局**：``constrained_layout`` 自动对齐元素
 
 内置风格
 --------
-``paper``  论文投稿风：细线、小字号、低饱和、黑白打印仍可区分。
-``slide``  演示答辩风：粗线、大字号、高饱和、远距离投影清晰可辨。
-``poster`` 海报展示风：超大字号、超粗线条、极简装饰。
+``journal`` 严谨期刊 —— 89 mm 单栏、无网格、600 dpi，投稿用
+``soft``    柔和学术 —— 浅点线网格、低饱和，报告与论文插图的默认选择
+``slide``   演示汇报 —— 大字粗线、浅网格，答辩 PPT 用
+``poster``  海报展示 —— 超大字号，学术海报用
 """
 
 from __future__ import annotations
@@ -31,119 +43,241 @@ __all__ = [
     "register_style",
     "get_style",
     "style_names",
+    "style_info",
     "current_style",
     "current_palette",
+    "current_background",
+    "BACKGROUNDS",
+    "MM_PER_INCH",
 ]
 
 
-# ---------------------------------------------------------------------------
-# 内置风格定义
-# ---------------------------------------------------------------------------
-# 每个风格是一个 rcParams 覆盖字典，刻意不含任何颜色 —— 颜色由配色层注入。
-# 这样"换配色不换风格"和"换风格不换配色"都能成立。
+MM_PER_INCH = 25.4
 
-_PAPER: dict[str, Any] = {
-    # --- 画布与字体 ---
-    "figure.figsize": (6.0, 4.0),
-    "figure.dpi": 120,
-    "savefig.dpi": 300,
-    "savefig.bbox": "tight",
-    "font.size": 10,
-    "axes.titlesize": 11,
-    "axes.labelsize": 10,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 9,
-    # --- 线条：细而克制 ---
-    "lines.linewidth": 1.2,
-    "lines.markersize": 4,
-    "patch.linewidth": 0.8,
-    # --- 坐标轴：四边保留，内向刻度，期刊惯例 ---
-    "axes.linewidth": 0.8,
-    "axes.spines.top": True,
-    "axes.spines.right": True,
-    "axes.grid": False,
-    "xtick.direction": "in",
-    "ytick.direction": "in",
-    "xtick.major.width": 0.8,
-    "ytick.major.width": 0.8,
-    "xtick.major.size": 3.5,
-    "ytick.major.size": 3.5,
+#: 可选底色。``white`` 通用；``cream`` 为素材里那种米色底，观感更温和。
+BACKGROUNDS: dict[str, str] = {
+    "white": "#FFFFFF",
+    "cream": "#FAF7F1",
+}
+
+
+def _mm(value: float) -> float:
+    """毫米转英寸。期刊图幅按毫米规格，这里统一换算。"""
+    return value / MM_PER_INCH
+
+
+# ---------------------------------------------------------------------------
+# 所有风格共享的视觉约定
+# ---------------------------------------------------------------------------
+
+_SHARED: dict[str, Any] = {
+    # --- 布局 ---
+    "figure.autolayout": False,
+    "figure.constrained_layout.use": True,
+    "figure.constrained_layout.h_pad": 0.04,
+    "figure.constrained_layout.w_pad": 0.04,
+    # --- 去边框：只留左、下 ---
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "axes.spines.left": True,
+    "axes.spines.bottom": True,
+    # --- 文字颜色：深灰而非纯黑，观感更柔和 ---
+    "text.color": "#1A1A1A",
+    "axes.labelcolor": "#1A1A1A",
+    "axes.edgecolor": "#3A3A3A",
+    "xtick.color": "#3A3A3A",
+    "ytick.color": "#3A3A3A",
+    # --- 刻度朝外 ---
+    "xtick.direction": "out",
+    "ytick.direction": "out",
+    # --- 网格压在数据之下 ---
+    "axes.axisbelow": True,
+    # --- 标记描白边：重叠点更清爽 ---
+    "lines.markeredgecolor": "white",
+    "lines.markeredgewidth": 0.6,
+    # --- 图例去框 ---
     "legend.frameon": False,
+    "legend.handlelength": 1.6,
+    "legend.handletextpad": 0.5,
+    "legend.borderaxespad": 0.3,
+    # --- 导出 ---
+    "savefig.bbox": "tight",
+    "savefig.pad_inches": 0.03,
+    "savefig.transparent": False,
+    # --- 图像 ---
+    "image.aspect": "auto",
 }
 
-_SLIDE: dict[str, Any] = {
-    # --- 画布与字体：大一号，保证投影可读 ---
-    "figure.figsize": (9.0, 5.5),
-    "figure.dpi": 110,
-    "savefig.dpi": 200,
-    "savefig.bbox": "tight",
-    "font.size": 16,
-    "axes.titlesize": 20,
-    "axes.labelsize": 17,
-    "xtick.labelsize": 14,
-    "ytick.labelsize": 14,
-    "legend.fontsize": 14,
-    # --- 线条：更粗更醒目 ---
-    "lines.linewidth": 2.6,
-    "lines.markersize": 8,
-    "patch.linewidth": 1.4,
-    # --- 坐标轴：去顶右边框，浅网格，现代风 ---
-    "axes.linewidth": 1.2,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
+#: 极浅点线网格，柔和的观感全靠它
+_GRID_SOFT: dict[str, Any] = {
     "axes.grid": True,
-    "grid.alpha": 0.25,
-    "grid.linewidth": 0.8,
-    "xtick.direction": "out",
-    "ytick.direction": "out",
-    "legend.frameon": True,
-    "legend.framealpha": 0.9,
+    "grid.color": "#CFCFCF",
+    "grid.linewidth": 0.6,
+    "grid.linestyle": ":",
+    "grid.alpha": 0.75,
 }
 
-_POSTER: dict[str, Any] = {
-    # --- 画布与字体：海报远观，字号再放大 ---
-    "figure.figsize": (11.0, 7.0),
-    "figure.dpi": 100,
-    "savefig.dpi": 300,
-    "savefig.bbox": "tight",
-    "font.size": 20,
-    "axes.titlesize": 26,
-    "axes.labelsize": 22,
-    "xtick.labelsize": 18,
-    "ytick.labelsize": 18,
-    "legend.fontsize": 18,
-    # --- 线条：最粗 ---
-    "lines.linewidth": 3.4,
-    "lines.markersize": 11,
-    "patch.linewidth": 1.8,
-    # --- 坐标轴：极简，无边框 ---
-    "axes.linewidth": 1.6,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
+
+# ---------------------------------------------------------------------------
+# 内置风格
+# ---------------------------------------------------------------------------
+
+# journal —— 严谨期刊：Nature/Science 规格，无网格，投稿专用
+_JOURNAL: dict[str, Any] = {
+    **_SHARED,
+    "figure.figsize": (_mm(89), _mm(89) * 0.75),   # 89 mm 单栏，4:3
+    "figure.dpi": 120,
+    "savefig.dpi": 600,
+    "font.size": 8,
+    "axes.titlesize": 8,
+    "axes.labelsize": 8,
+    "xtick.labelsize": 7,
+    "ytick.labelsize": 7,
+    "legend.fontsize": 7,
+    "axes.linewidth": 0.6,
+    "xtick.major.width": 0.6,
+    "ytick.major.width": 0.6,
+    "xtick.major.size": 3,
+    "ytick.major.size": 3,
+    "xtick.minor.width": 0.5,
+    "ytick.minor.width": 0.5,
+    "lines.linewidth": 1.5,
+    "lines.markersize": 3.5,
+    "patch.linewidth": 0.6,
     "axes.grid": False,
-    "xtick.direction": "out",
-    "ytick.direction": "out",
+}
+
+# soft —— 柔和学术：浅点线网格、低饱和，本库的默认风格
+_SOFT: dict[str, Any] = {
+    **_SHARED,
+    **_GRID_SOFT,
+    "figure.figsize": (_mm(140), _mm(140) * 0.72),
+    "figure.dpi": 110,
+    "savefig.dpi": 400,
+    "font.size": 9,
+    "axes.titlesize": 10,
+    "axes.labelsize": 9.5,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 8,
+    "axes.linewidth": 0.6,
+    "xtick.major.width": 0.6,
+    "ytick.major.width": 0.6,
+    "xtick.major.size": 3,
+    "ytick.major.size": 3,
+    "lines.linewidth": 1.8,
+    "lines.markersize": 5,
+    "patch.linewidth": 0.7,
+}
+
+# slide —— 演示汇报：大字粗线，浅实线网格
+_SLIDE: dict[str, Any] = {
+    **_SHARED,
+    "axes.grid": True,
+    "grid.color": "#DCDCDC",
+    "grid.linewidth": 1.0,
+    "grid.linestyle": "-",
+    "grid.alpha": 0.8,
+    "figure.figsize": (_mm(230), _mm(230) * 0.60),
+    "figure.dpi": 100,
+    "savefig.dpi": 200,
+    "font.size": 15,
+    "axes.titlesize": 19,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 13,
+    "axes.linewidth": 1.2,
+    "xtick.major.width": 1.2,
+    "ytick.major.width": 1.2,
+    "xtick.major.size": 5,
+    "ytick.major.size": 5,
+    "lines.linewidth": 2.8,
+    "lines.markersize": 8,
+    "lines.markeredgewidth": 1.0,
+    "patch.linewidth": 1.2,
+}
+
+# poster —— 海报展示：超大字号，无网格
+_POSTER: dict[str, Any] = {
+    **_SHARED,
+    "axes.grid": False,
+    "figure.figsize": (_mm(280), _mm(280) * 0.64),
+    "figure.dpi": 90,
+    "savefig.dpi": 300,
+    "font.size": 19,
+    "axes.titlesize": 25,
+    "axes.labelsize": 21,
+    "xtick.labelsize": 17,
+    "ytick.labelsize": 17,
+    "legend.fontsize": 17,
+    "axes.linewidth": 1.6,
+    "xtick.major.width": 1.6,
+    "ytick.major.width": 1.6,
     "xtick.major.size": 7,
     "ytick.major.size": 7,
-    "legend.frameon": False,
+    "lines.linewidth": 3.6,
+    "lines.markersize": 11,
+    "lines.markeredgewidth": 1.4,
+    "patch.linewidth": 1.6,
 }
 
-#: 风格注册表：风格名 -> rcParams 覆盖字典
+#: 风格注册表
 STYLES: dict[str, dict[str, Any]] = {
-    "paper": _PAPER,
+    "journal": _JOURNAL,
+    "soft": _SOFT,
     "slide": _SLIDE,
     "poster": _POSTER,
 }
 
-#: 当前激活的风格名与配色名
+#: 各风格的定位说明（供文档与 CLI 展示）
+_STYLE_DESC: dict[str, dict[str, str]] = {
+    "journal": {
+        "label": "严谨期刊",
+        "usage": "论文投稿、学位论文",
+        "character": "89 mm 单栏 · 无网格 · 0.6pt 细轴 · 600 dpi",
+    },
+    "soft": {
+        "label": "柔和学术",
+        "usage": "组会汇报、论文插图（默认）",
+        "character": "浅灰点线网格 · 低饱和 · 0.6pt 细轴配 1.8pt 粗线",
+    },
+    "slide": {
+        "label": "演示汇报",
+        "usage": "答辩 PPT、课堂展示",
+        "character": "大字粗线 · 浅色实线网格 · 投影可辨",
+    },
+    "poster": {
+        "label": "海报展示",
+        "usage": "学术海报、远距离展示",
+        "character": "超大字号 · 无网格 · 极简装饰",
+    },
+}
+
 _current: str | None = None
 _current_palette: str = "soft_academic"
+_current_background: str = "white"
 
 
 def style_names() -> list[str]:
     """返回所有已注册的风格名（按注册顺序）。"""
     return list(STYLES)
+
+
+def style_info() -> list[tuple[str, str, str, str]]:
+    """返回风格清单，便于打印或生成文档。
+
+    返回
+    ----
+    list[tuple]
+        每项为 ``(名称, 中文标签, 适用场景, 视觉特征)``。
+    """
+    return [
+        (name, _STYLE_DESC.get(name, {}).get("label", name),
+         _STYLE_DESC.get(name, {}).get("usage", ""),
+         _STYLE_DESC.get(name, {}).get("character", ""))
+        for name in STYLES
+    ]
 
 
 def get_style(name: str) -> dict[str, Any]:
@@ -176,20 +310,23 @@ def register_style(name: str, params: dict[str, Any]) -> None:
 
 
 def set_style(
-    name: str = "paper",
+    name: str = "soft",
     *,
     palette: str | None = "soft_academic",
+    background: str = "white",
     font: bool = True,
 ) -> str:
-    """激活指定风格与配色，返回风格名以便链式调用。
+    """激活指定风格、配色与底色，返回风格名以便链式调用。
 
     参数
     ----
-    name : str
+    name : str, 默认 "soft"
         风格名，见 :func:`style_names`。
     palette : str | None, 默认 "soft_academic"
         配色名，见 :func:`modelfig.palettes.palette_names`。
-        置为 ``None`` 表示不使用内置配色（保留 matplotlib 默认色）。
+        置为 ``None`` 表示不接管颜色（保留 matplotlib 默认色）。
+    background : str, 默认 "white"
+        ``"white"`` 纯白 或 ``"cream"`` 米色（更温和，见 :data:`BACKGROUNDS`）。
     font : bool, 默认 True
         是否同时配置中文字体。
 
@@ -198,17 +335,25 @@ def set_style(
     str
         实际激活的风格名。
     """
-    global _current, _current_palette
+    global _current, _current_palette, _current_background
 
     params = get_style(name)
     mpl.rcdefaults()          # 先回到干净状态，避免风格之间互相污染
     mpl.rcParams.update(params)
 
-    # 配色层：覆盖 axes.prop_cycle，与风格正交。
     if palette is not None:
-        colors = categorical(palette)
-        mpl.rcParams["axes.prop_cycle"] = mpl.cycler(color=colors)
+        mpl.rcParams["axes.prop_cycle"] = mpl.cycler(color=categorical(palette))
         _current_palette = palette
+
+    if background not in BACKGROUNDS:
+        raise KeyError(
+            f"未知底色 {background!r}。可用底色：{', '.join(BACKGROUNDS)}"
+        )
+    bg = BACKGROUNDS[background]
+    mpl.rcParams["figure.facecolor"] = bg
+    mpl.rcParams["savefig.facecolor"] = bg
+    mpl.rcParams["axes.facecolor"] = bg
+    _current_background = background
 
     if font:
         from .fonts import setup_chinese_font
@@ -227,3 +372,8 @@ def current_style() -> str | None:
 def current_palette() -> str:
     """返回当前激活的配色名。"""
     return _current_palette
+
+
+def current_background() -> str:
+    """返回当前激活的底色名。"""
+    return _current_background
